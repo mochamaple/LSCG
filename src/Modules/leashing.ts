@@ -107,6 +107,8 @@ type LeashingRemovalReason =
     | "Timeout"
 ;
 
+const LEASH_END_PREFIX = "End of ";
+
 export interface LeashClasp {
     a: number;
     b: number;
@@ -715,6 +717,7 @@ export class LeashingModule extends BaseModule {
         for (const p of this.Pairings)
             this.RemoveCallback(p);
         this.Pairings = [];
+        this.ClaspedLeashes = [];
     }
 
     // A grab that couldn't pull us ends at both sides
@@ -808,7 +811,7 @@ export class LeashingModule extends BaseModule {
         if (leash === null)
             return;
         // Crafted names are at most 30 characters, and § and ¶ separate crafts when they're bundled
-        const name = `End of ${CharacterNickname(A).replace(/[\xA7\xB6]/g, "").slice(0, 15)}'s leash`;
+        const name = `${LEASH_END_PREFIX}${CharacterNickname(A).replace(/[\xA7\xB6]/g, "").slice(0, 15)}'s leash`;
         const craft: CraftingPartialItem = { Name: name, Description: "", Effects: {}, Private: false };
         // Our bc-stubs only type a full craft here, but BC takes a partial one
         InventoryWear(B, leash.Asset.Name, "ItemNeckRestraints", leash.Color, null, null, craft as CraftingItem);
@@ -913,7 +916,8 @@ export class LeashingModule extends BaseModule {
     // pelvis leash or a pony gag's reins stay on
     DropSharedLeash() {
         const leash = this.NeckLeash(Player);
-        if (leash !== null && InventoryGetLock(leash) === null) {
+        // Only the end we were given: a leash we put on ourselves since stays, whatever the clasp's message says
+        if (leash !== null && leash.Craft?.Name?.startsWith(LEASH_END_PREFIX) && InventoryGetLock(leash) === null) {
             InventoryRemove(Player, "ItemNeckRestraints");
             ChatRoomCharacterUpdate(Player);
         }
@@ -1023,7 +1027,12 @@ export class LeashingModule extends BaseModule {
         // Someone may have seen our leashing as on from settings we've since changed
         if (!this.CanBeChangedBy(sender, pairedMember) || (type === "leash" && !this.Enabled))
             return;
-        if (type === "leash" && emitBefore("grab.beforeIncoming", { type, sender }).cancelled) {
+        // The clasper checked these on their side, but nothing makes them: we hold our own line here
+        if (type === "leash" && (
+            Player.OnlineSharedSettings?.AllowPlayerLeashing === false ||
+            !ChatRoomCanBeLeashedBy(sender, Player) ||
+            emitBefore("grab.beforeIncoming", { type, sender }).cancelled
+        )) {
             // Refused: tell the other end to drop theirs, as if we had let go
             SendAction("%NAME% slips out of the clasp.");
             sendLSCGCommandBeep(pairedMember, "release", [
